@@ -48,6 +48,13 @@ def check_room():
 
             start_button = page.query_selector('button:has-text("参加する")')
             if start_button:
+                # 表示名が未入力だと「表示名を入力してください」というバリデーションで
+                # 入室がブロックされる（クリック自体は成功するため、これまで気づけなかった）。
+                # そのため、クリックする前に表示名欄を埋めておく。
+                name_input = page.query_selector('#name')
+                if name_input:
+                    name_input.fill('checker')
+
                 start_button.click()
             else:
                 # デバッグ用に、実際に描画された画面のタイトルとbody先頭部分を返す
