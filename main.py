@@ -46,7 +46,7 @@ def check_room():
             except Exception:
                 pass  # 見つからなければ下のquery_selectorでNoneになり、デバッグ情報を返す
 
-            start_button = page.query_selector('button:has-text("参加する")')
+            start_button = page.query_selector('button:has-text("ちんぽ")')
             if start_button:
                 start_button.click()
             else:
