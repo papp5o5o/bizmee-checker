@@ -32,40 +32,46 @@ def check_room():
             page.goto(url, timeout=30000)
             page.wait_for_timeout(2000)
             
-            # 入室ボタンのクリック処理
-            buttons = page.query_selector_all('button, a, input[type="button"]')
+            # 入室用ボタンがあればクリック
+            buttons = page.query_selector_all('button')
             for btn in buttons:
-                text = btn.inner_text().strip()
-                if any(keyword in text for keyword in ['入室', '開始', 'Enter', 'Join']):
+                txt = btn.inner_text().strip()
+                if any(k in txt for k in ['開始', '入室', '参加', 'Enter', 'Join']):
                     try:
                         btn.click()
                     except:
                         pass
-                    break
             
-            # 入室後の読み込み待ち
-            page.wait_for_timeout(4000)
+            # 参加者エリア（.peers または .peer-view）の描画を待機
+            try:
+                page.wait_for_selector('.peers, .peer-view', timeout=8000)
+            except:
+                pass
             
-            # 画面上のすべてのビデオ（映像枠）を取得
-            videos = page.query_selector_all('video')
-            total_videos = len(videos)
+            page.wait_for_timeout(3000)
             
-            # 調査プログラム自身（1枠分）を除外した人数を計算
-            other_count = max(0, total_videos - 1)
+            # 自分以外（.self を持たない .peer-view）を取得
+            other_peers = page.query_selector_all('.peer-view:not(.self)')
             
-            # 画面内のテキスト要素から名前と思われる文字列を取得
             names = []
-            labels = page.query_selector_all('.name, .user-name, .participant, [class*="name"]')
-            for lbl in labels:
-                txt = lbl.inner_text().strip()
-                if txt and txt not in names and len(txt) < 30:
-                    names.append(txt)
+            for peer in other_peers:
+                # ユーザー名の要素（aタグなど）を探してテキストを抽出
+                name_elem = peer.query_selector('a') or peer
+                if name_elem:
+                    full_text = name_elem.inner_text().strip()
+                    if full_text:
+                        # 複数行ある場合は最初の1行目を名前として取得
+                        first_line = full_text.split('\n')[0].strip()
+                        if first_line and first_line not in names:
+                            names.append(first_line)
+            
+            count = len(other_peers)
             
             browser.close()
             
             return jsonify({
                 'room': room_name,
-                'count': len(names) if names else other_count,
+                'count': count,
                 'names': names
             })
     except Exception as e:
