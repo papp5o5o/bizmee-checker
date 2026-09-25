@@ -41,36 +41,56 @@ def scrape_room(room_name, debug=False):
             before_join_html = page.content() if debug else None
             before_join_shot = page.screenshot(full_page=True) if debug else None
 
-            # 入室/開始ボタンがあれば押す（文言のゆれに対応）
-            for label in ("入室", "開始", "Join", "参加する"):
+            # 「開始」ボタンはテキストを持たないアイコンボタン(img alt属性のみ)の可能性が高いため、
+            # テキスト一致・img alt一致・aria-label一致を順番に試す。
+            clicked = False
+            for label in ("入室", "開始", "Join", "参加する", "スタート", "Start"):
                 btn = page.query_selector(f'button:has-text("{label}")')
                 if btn:
                     btn.click()
+                    clicked = True
                     break
+            if not clicked:
+                for label in ("開始", "入室", "参加", "スタート", "Join", "Start"):
+                    btn = page.query_selector(f'button:has(img[alt*="{label}"])')
+                    if btn:
+                        btn.click()
+                        clicked = True
+                        break
+            if not clicked:
+                for label in ("開始", "入室", "参加", "スタート", "Join", "Start"):
+                    btn = page.query_selector(f'[aria-label*="{label}"]')
+                    if btn:
+                        btn.click()
+                        clicked = True
+                        break
 
-            # 固定3秒待ちではなく、video要素が出現するまで待つ（最大10秒）
+            # 固定3秒待ちではなく、参加者タイル(.peer-view)が出現するまで待つ（最大10秒）
             # BIZMEEはP2P(ブラウザ同士が直接つながるWebRTC)方式のため、
-            # 実際に他の参加者と接続が確立するまでvideo要素が増えない可能性がある。
+            # 実際に他の参加者と接続が確立するまで増えない可能性がある。
             try:
-                page.wait_for_selector("video", timeout=10000)
+                page.wait_for_selector(".peer-view", timeout=10000)
             except Exception:
                 pass
             page.wait_for_timeout(3000)  # WebRTC(P2P)接続が安定するまでの猶予
 
-            # 名前は video タグの中には入っていない（video要素はテキストを持たない）ので、
-            # 名前表示用と思われる要素を別途探す。クラス名は推測なので複数パターンを試す。
+            # 実際のDOM構造(ユーザー提供のキャプチャより判明):
+            #   .peers > .peer-view (参加者タイル、自分は .peer-view.self) > .footer(表示名)
+            # 自分(bot自身)のタイルは除外し、他の参加者のみを数える。
             names = []
-            for el in page.query_selector_all(
-                ".user-name, .participant-name, [class*='name'], [class*='Name']"
-            ):
-                text = el.inner_text().strip()
-                if text and text not in names:
+            for el in page.query_selector_all(".peer-view"):
+                classes = (el.get_attribute("class") or "").split()
+                if "self" in classes:
+                    continue  # bot自身のタイルは除外
+                footer = el.query_selector(".footer")
+                text = footer.inner_text().strip() if footer else ""
+                if text:
                     names.append(text)
 
-            video_count = len(page.query_selector_all("video"))
-            count = len(names) if names else video_count
+            all_peer_views = page.query_selector_all(".peer-view")
+            count = max(0, len(all_peer_views) - 1)  # 自分の分を1引く
 
-            result = {"room": room_name, "count": count, "names": names}
+            result = {"room": room_name, "count": count, "names": names, "join_button_clicked": clicked}
 
             if debug:
                 # 実際に取得できたHTML・スクリーンショット・consoleログを返す。
