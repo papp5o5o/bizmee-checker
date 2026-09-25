@@ -37,12 +37,28 @@ def check_room():
             #   「参加する」というテキストのボタンのみが入室ボタン。
             #   待機画面にはマイクオフ・カメラオフの切替ボタンが先に存在するため、
             #   むやみに最初の<button>を押すと入室できない）
+            #
+            # SvelteKit製のアプリはgoto()のload完了後もJSでの画面描画(ハイドレーション)が
+            # 続いているため、即座にquery_selectorすると見つからないことがある。
+            # そのため明示的にボタンが描画されるまで待つ。
+            try:
+                page.wait_for_selector('button:has-text("参加する")', timeout=15000)
+            except Exception:
+                pass  # 見つからなければ下のquery_selectorでNoneになり、デバッグ情報を返す
+
             start_button = page.query_selector('button:has-text("参加する")')
             if start_button:
                 start_button.click()
             else:
+                # デバッグ用に、実際に描画された画面のタイトルとbody先頭部分を返す
+                page_title = page.title()
+                body_html = page.eval_on_selector('body', 'el => el.innerHTML') if page.query_selector('body') else ''
                 browser.close()
-                return jsonify({'error': '参加ボタンが見つかりませんでした（部屋が存在しないか、画面構成が変更されています）'}), 404
+                return jsonify({
+                    'error': '参加ボタンが見つかりませんでした（部屋が存在しないか、画面構成が変更されています）',
+                    'debug_title': page_title,
+                    'debug_body_snippet': body_html[:1500]
+                }), 404
 
             # 入室後の描画待ち
             page.wait_for_timeout(3000)
@@ -75,3 +91,4 @@ def check_room():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
+    
