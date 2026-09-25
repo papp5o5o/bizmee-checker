@@ -1,4 +1,4 @@
 flask
 flask-cors
-playwright
+playwright==1.63.0
 gunicorn
