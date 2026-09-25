@@ -56,6 +56,17 @@ def check_room():
                     name_input.fill('checker')
 
                 start_button.click()
+
+                # 「参加する」を押すと利用規約への同意ダイアログが出ることがある。
+                # ここで「同意して参加する」を押さないと実際には入室できない。
+                # 出ない場合（既に同意済み等）もあるため、出なければ無視して進める。
+                try:
+                    agree_button = page.wait_for_selector(
+                        'button:has-text("同意して参加する")', timeout=5000
+                    )
+                    agree_button.click()
+                except Exception:
+                    pass
             else:
                 # デバッグ用に、実際に描画された画面のタイトルとbody先頭部分を返す
                 page_title = page.title()
