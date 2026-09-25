@@ -6,80 +6,99 @@ from playwright.sync_api import sync_playwright
 app = Flask(__name__)
 CORS(app)
 
-@app.route('/check-room', methods=['POST'])
+
+def scrape_room(room_name, debug=False):
+    url = f"https://bizmee.net/{room_name}"
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--use-fake-ui-for-media-stream",
+                "--use-fake-device-for-media-stream",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+            ],
+        )
+        try:
+            context = browser.new_context(permissions=["camera", "microphone"])
+            page = context.new_page()
+
+            console_logs = []
+            page.on("console", lambda msg: console_logs.append(msg.text))
+
+            page.goto(url, timeout=30000)
+
+            # 入室/開始ボタンがあれば押す（文言のゆれに対応）
+            for label in ("入室", "開始", "Join", "参加する"):
+                btn = page.query_selector(f'button:has-text("{label}")')
+                if btn:
+                    btn.click()
+                    break
+
+            # 固定3秒待ちではなく、video要素が出現するまで待つ（最大10秒）
+            try:
+                page.wait_for_selector("video", timeout=10000)
+            except Exception:
+                pass
+            page.wait_for_timeout(2000)  # WebRTC接続が安定するまでの猶予
+
+            # 名前は video タグの中には入っていない（video要素はテキストを持たない）ので、
+            # 名前表示用と思われる要素を別途探す。クラス名は推測なので複数パターンを試す。
+            names = []
+            for el in page.query_selector_all(
+                ".user-name, .participant-name, [class*='name'], [class*='Name']"
+            ):
+                text = el.inner_text().strip()
+                if text and text not in names:
+                    names.append(text)
+
+            video_count = len(page.query_selector_all("video"))
+            count = len(names) if names else video_count
+
+            result = {"room": room_name, "count": count, "names": names}
+
+            if debug:
+                # 実際に取得できたHTMLとconsoleログを返す。
+                # ここから本物のクラス名/構造を確認し、上のセレクタを実サイトに合わせて調整する。
+                result["html"] = page.content()
+                result["console_logs"] = console_logs[-30:]
+
+            return result
+        finally:
+            # 例外が起きてもブラウザプロセスを必ず閉じる。
+            # ここが無いと、失敗するたびにChromiumプロセスが残り続け、
+            # メモリ制限の厳しいRenderの無料枠では数回の失敗でメモリを食い潰して
+            # 以降のリクエストが「エラーも出ずに固まる」状態になり得る。
+            browser.close()
+
+
+@app.route("/check-room", methods=["POST"])
 def check_room():
     data = request.get_json() or {}
-    room_name = data.get('room_name')
+    room_name = data.get("room_name")
     if not room_name:
-        return jsonify({'error': '部屋名を入力してください'}), 400
-
-    url = f"https://bizmee.net/{room_name}"
-    
+        return jsonify({"error": "部屋名を入力してください"}), 400
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--use-fake-ui-for-media-stream",
-                    "--use-fake-device-for-media-stream",
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox"
-                ]
-            )
-            context = browser.new_context(permissions=['camera', 'microphone'])
-            page = context.new_page()
-            
-            page.goto(url, timeout=30000)
-            page.wait_for_timeout(3000)
-            
-            # 1. 名前入力欄があれば「監視Bot」と入力
-            name_input = page.query_selector('input[type="text"], input')
-            if name_input:
-                try:
-                    name_input.fill('監視Bot')
-                except:
-                    pass
-
-            # 2. 入室ボタンを探してクリック
-            btn_info = "ボタンが見つかりませんでした"
-            start_btn = page.query_selector('button:has-text("入室"), button:has-text("開始"), button:has-text("参加"), button')
-            if start_btn:
-                btn_info = f"発見したボタン: {start_btn.inner_text().strip()}"
-                try:
-                    start_btn.click()
-                    btn_info += " (クリック成功)"
-                except Exception as click_err:
-                    btn_info += f" (クリック失敗: {click_err})"
-            
-            # 3. 通信接続と画面読み込みを待機（6秒）
-            page.wait_for_timeout(6000)
-            
-            # 4. 画面内のピア枠 (.peer-view) の状態を確認
-            all_peers = page.query_selector_all('.peer-view')
-            other_peers = page.query_selector_all('.peer-view:not(.self)')
-            
-            names = []
-            for peer in other_peers:
-                name_elem = peer.query_selector('a') or peer
-                if name_elem:
-                    txt = name_elem.inner_text().strip()
-                    if txt:
-                        first_line = txt.split('\n')[0].strip()
-                        if first_line and first_line not in names:
-                            names.append(first_line)
-            
-            browser.close()
-            
-            return jsonify({
-                'room': room_name,
-                'debug_button': btn_info,
-                'total_peers_detected': len(all_peers),
-                'count': len(other_peers),
-                'names': names
-            })
+        return jsonify(scrape_room(room_name))
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+
+@app.route("/debug-room", methods=["POST"])
+def debug_room():
+    """調査用エンドポイント。実際に取得できたHTMLとconsoleログをそのまま返す。
+    正しいセレクタが分かるまでの間、一時的にこれを叩いて確認する用途。"""
+    data = request.get_json() or {}
+    room_name = data.get("room_name")
+    if not room_name:
+        return jsonify({"error": "部屋名を入力してください"}), 400
+    try:
+        return jsonify(scrape_room(room_name, debug=True))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
