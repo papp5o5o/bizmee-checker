@@ -19,6 +19,11 @@ def scrape_room(room_name, debug=False):
                 "--use-fake-device-for-media-stream",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",  # コンテナの/dev/shmが小さく、Chromiumが原因不明にクラッシュするのを防ぐ
+                "--disable-gpu",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--single-process",  # メモリ使用量を削る（不安定なら外す）
             ],
         )
         try:
@@ -86,6 +91,12 @@ def scrape_room(room_name, debug=False):
             # メモリ制限の厳しいRenderの無料枠では数回の失敗でメモリを食い潰して
             # 以降のリクエストが「エラーも出ずに固まる」状態になり得る。
             browser.close()
+
+
+@app.route("/", methods=["GET"])
+def health_check():
+    # ブラウザで直接開いて動作確認できる簡易ヘルスチェック
+    return jsonify({"status": "ok"})
 
 
 @app.route("/check-room", methods=["POST"])
