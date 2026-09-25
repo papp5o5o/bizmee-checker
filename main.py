@@ -17,7 +17,6 @@ def check_room():
     
     try:
         with sync_playwright() as p:
-            # カメラ・マイクのアクセスを自動許可し、画面なしでブラウザを起動
             browser = p.chromium.launch(
                 headless=True,
                 args=[
@@ -31,30 +30,42 @@ def check_room():
             page = context.new_page()
             
             page.goto(url, timeout=30000)
+            page.wait_for_timeout(2000)
             
-            # 開始/入室ボタンがあれば押す
-            start_button = page.query_selector('button:has-text("入室")') or page.query_selector('button:has-text("開始")') or page.query_selector('button')
-            if start_button:
-                start_button.click()
+            # 入室ボタンのクリック処理
+            buttons = page.query_selector_all('button, a, input[type="button"]')
+            for btn in buttons:
+                text = btn.inner_text().strip()
+                if any(keyword in text for keyword in ['入室', '開始', 'Enter', 'Join']):
+                    try:
+                        btn.click()
+                    except:
+                        pass
+                    break
             
-            # 画面の読み込み待ち（3秒）
-            page.wait_for_timeout(3000)
+            # 入室後の読み込み待ち
+            page.wait_for_timeout(4000)
             
-            # 参加者名の取得
-            elements = page.query_selector_all('.user-name, .participant-name, video')
+            # 画面上のすべてのビデオ（映像枠）を取得
+            videos = page.query_selector_all('video')
+            total_videos = len(videos)
+            
+            # 調査プログラム自身（1枠分）を除外した人数を計算
+            other_count = max(0, total_videos - 1)
+            
+            # 画面内のテキスト要素から名前と思われる文字列を取得
             names = []
-            for el in elements:
-                text = el.inner_text().strip()
-                if text and text not in names:
-                    names.append(text)
-            
-            count = len(names) if names else len(elements)
+            labels = page.query_selector_all('.name, .user-name, .participant, [class*="name"]')
+            for lbl in labels:
+                txt = lbl.inner_text().strip()
+                if txt and txt not in names and len(txt) < 30:
+                    names.append(txt)
             
             browser.close()
             
             return jsonify({
                 'room': room_name,
-                'count': count,
+                'count': len(names) if names else other_count,
                 'names': names
             })
     except Exception as e:
