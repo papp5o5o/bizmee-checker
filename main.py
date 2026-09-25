@@ -60,8 +60,51 @@ def check_room():
                     'debug_body_snippet': body_html[:1500]
                 }), 404
 
+            # 「参加する」をクリックしただけでは入室完了とは限らない。
+            # WebRTC接続の確立に失敗している場合、待機画面のまま止まることがあるため、
+            # 入室完了時にしか出現しない「退室」ボタン(.leave-room)が表示されるまで待って
+            # 本当に入室できたかどうかを検証する。
+            joined = True
+            try:
+                page.wait_for_selector('.leave-room', timeout=20000)
+            except Exception:
+                joined = False
+
+            if not joined:
+                # 入室に失敗している。原因確認用にスクリーンショットとページ情報を返す
+                import base64
+                screenshot_b64 = base64.b64encode(page.screenshot()).decode('utf-8')
+                page_title = page.title()
+                body_html = page.eval_on_selector('body', 'el => el.innerHTML') if page.query_selector('body') else ''
+                browser.close()
+                return jsonify({
+                    'error': '「参加する」はクリックしましたが、入室完了を確認できませんでした（WebRTC接続の確立に失敗している可能性があります）',
+                    'debug_title': page_title,
+                    'debug_body_snippet': body_html[:1500],
+                    'debug_screenshot_base64': screenshot_b64
+                }), 500
+
             # 入室後、他参加者との接続・描画待ち
             page.wait_for_timeout(5000)
+
+            # .leave-room（入室完了の証拠）は出現していても、カメラ映像コンポーネント
+            # である .peer-view は別タイミングで描画されるため、こちらも出現を明示的に待つ。
+            # ここで出てこない場合、入室自体はできていてもカメラ映像の初期化
+            # （getUserMedia周り）に失敗している可能性が高い。
+            try:
+                page.wait_for_selector('.peer-view', timeout=10000)
+            except Exception:
+                import base64
+                screenshot_b64 = base64.b64encode(page.screenshot()).decode('utf-8')
+                page_title = page.title()
+                body_html = page.eval_on_selector('body', 'el => el.innerHTML') if page.query_selector('body') else ''
+                browser.close()
+                return jsonify({
+                    'error': '入室はできましたが、カメラ映像の初期化(.peer-view)が確認できませんでした（getUserMedia周りの失敗の可能性）',
+                    'debug_title': page_title,
+                    'debug_body_snippet': body_html[:1500],
+                    'debug_screenshot_base64': screenshot_b64
+                }), 500
 
             # 参加者一覧の取得
             # 実際の入室後画面では、参加者1人につき .peer-view 要素が1つ生成され、
@@ -98,4 +141,3 @@ def check_room():
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
-    
