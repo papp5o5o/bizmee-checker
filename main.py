@@ -30,48 +30,51 @@ def check_room():
             page = context.new_page()
             
             page.goto(url, timeout=30000)
-            page.wait_for_timeout(2000)
-            
-            # 入室用ボタンがあればクリック
-            buttons = page.query_selector_all('button')
-            for btn in buttons:
-                txt = btn.inner_text().strip()
-                if any(k in txt for k in ['開始', '入室', '参加', 'Enter', 'Join']):
-                    try:
-                        btn.click()
-                    except:
-                        pass
-            
-            # 参加者エリア（.peers または .peer-view）の描画を待機
-            try:
-                page.wait_for_selector('.peers, .peer-view', timeout=8000)
-            except:
-                pass
-            
             page.wait_for_timeout(3000)
             
-            # 自分以外（.self を持たない .peer-view）を取得
+            # 1. 名前入力欄があれば「監視Bot」と入力
+            name_input = page.query_selector('input[type="text"], input')
+            if name_input:
+                try:
+                    name_input.fill('監視Bot')
+                except:
+                    pass
+
+            # 2. 入室ボタンを探してクリック
+            btn_info = "ボタンが見つかりませんでした"
+            start_btn = page.query_selector('button:has-text("入室"), button:has-text("開始"), button:has-text("参加"), button')
+            if start_btn:
+                btn_info = f"発見したボタン: {start_btn.inner_text().strip()}"
+                try:
+                    start_btn.click()
+                    btn_info += " (クリック成功)"
+                except Exception as click_err:
+                    btn_info += f" (クリック失敗: {click_err})"
+            
+            # 3. 通信接続と画面読み込みを待機（6秒）
+            page.wait_for_timeout(6000)
+            
+            # 4. 画面内のピア枠 (.peer-view) の状態を確認
+            all_peers = page.query_selector_all('.peer-view')
             other_peers = page.query_selector_all('.peer-view:not(.self)')
             
             names = []
             for peer in other_peers:
-                # ユーザー名の要素（aタグなど）を探してテキストを抽出
                 name_elem = peer.query_selector('a') or peer
                 if name_elem:
-                    full_text = name_elem.inner_text().strip()
-                    if full_text:
-                        # 複数行ある場合は最初の1行目を名前として取得
-                        first_line = full_text.split('\n')[0].strip()
+                    txt = name_elem.inner_text().strip()
+                    if txt:
+                        first_line = txt.split('\n')[0].strip()
                         if first_line and first_line not in names:
                             names.append(first_line)
-            
-            count = len(other_peers)
             
             browser.close()
             
             return jsonify({
                 'room': room_name,
-                'count': count,
+                'debug_button': btn_info,
+                'total_peers_detected': len(all_peers),
+                'count': len(other_peers),
                 'names': names
             })
     except Exception as e:
