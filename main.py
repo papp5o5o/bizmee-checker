@@ -53,7 +53,7 @@ def check_room():
                 # そのため、クリックする前に表示名欄を埋めておく。
                 name_input = page.query_selector('#name')
                 if name_input:
-                    name_input.fill('checker')
+                    name_input.fill('試験運用中のBOT【気にしないで】')
 
                 start_button.click()
 
