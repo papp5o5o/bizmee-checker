@@ -60,30 +60,37 @@ def check_room():
                     'debug_body_snippet': body_html[:1500]
                 }), 404
 
-            # 入室後の描画待ち
-            page.wait_for_timeout(3000)
+            # 入室後、他参加者との接続・描画待ち
+            page.wait_for_timeout(5000)
 
             # 参加者一覧の取得
             # 実際の入室後画面では、参加者1人につき .peer-view 要素が1つ生成され、
-            # その中の .footer 要素に表示名が入る（.user-name / .participant-name は存在しない）
+            # その中の .footer 要素に表示名が入る（.user-name / .participant-name は存在しない）。
+            # 自分自身の映像プレビューにも class="peer-view self ..." が付くため、
+            # 「他の参加者」だけを数えるには self を除外する必要がある。
             peer_views = page.query_selector_all('.peer-view')
 
             names = []
+            other_count = 0
             for peer in peer_views:
+                class_attr = peer.get_attribute('class') or ''
+                is_self = 'self' in class_attr.split()
+
                 footer = peer.query_selector('.footer')
-                if footer:
-                    text = footer.inner_text().strip()
+                text = footer.inner_text().strip() if footer else ''
+
+                if not is_self:
+                    other_count += 1
                     if text:
                         names.append(text)
-
-            count = len(peer_views)
 
             browser.close()
 
             return jsonify({
                 'room': room_name,
-                'count': count,
-                'names': names
+                'count': other_count,
+                'names': names,
+                'debug_total_peer_views': len(peer_views)  # 自分自身を含む総数（確認用）
             })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
