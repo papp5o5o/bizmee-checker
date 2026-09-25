@@ -1,3 +1,4 @@
+import base64
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -25,9 +26,15 @@ def scrape_room(room_name, debug=False):
             page = context.new_page()
 
             console_logs = []
-            page.on("console", lambda msg: console_logs.append(msg.text))
+            page_errors = []
+            page.on("console", lambda msg: console_logs.append(f"[{msg.type}] {msg.text}"))
+            page.on("pageerror", lambda err: page_errors.append(str(err)))
 
             page.goto(url, timeout=30000)
+            page.wait_for_timeout(1500)  # 入室前ロビー画面の描画待ち
+
+            before_join_html = page.content() if debug else None
+            before_join_shot = page.screenshot(full_page=True) if debug else None
 
             # 入室/開始ボタンがあれば押す（文言のゆれに対応）
             for label in ("入室", "開始", "Join", "参加する"):
@@ -37,11 +44,13 @@ def scrape_room(room_name, debug=False):
                     break
 
             # 固定3秒待ちではなく、video要素が出現するまで待つ（最大10秒）
+            # BIZMEEはP2P(ブラウザ同士が直接つながるWebRTC)方式のため、
+            # 実際に他の参加者と接続が確立するまでvideo要素が増えない可能性がある。
             try:
                 page.wait_for_selector("video", timeout=10000)
             except Exception:
                 pass
-            page.wait_for_timeout(2000)  # WebRTC接続が安定するまでの猶予
+            page.wait_for_timeout(3000)  # WebRTC(P2P)接続が安定するまでの猶予
 
             # 名前は video タグの中には入っていない（video要素はテキストを持たない）ので、
             # 名前表示用と思われる要素を別途探す。クラス名は推測なので複数パターンを試す。
@@ -59,10 +68,16 @@ def scrape_room(room_name, debug=False):
             result = {"room": room_name, "count": count, "names": names}
 
             if debug:
-                # 実際に取得できたHTMLとconsoleログを返す。
-                # ここから本物のクラス名/構造を確認し、上のセレクタを実サイトに合わせて調整する。
-                result["html"] = page.content()
-                result["console_logs"] = console_logs[-30:]
+                # 実際に取得できたHTML・スクリーンショット・consoleログを返す。
+                # ここから本物のクラス名/構造や、WebRTC接続が失敗していないかを確認する。
+                result["before_join_html"] = before_join_html
+                result["before_join_screenshot_base64"] = base64.b64encode(before_join_shot).decode()
+                result["after_join_html"] = page.content()
+                result["after_join_screenshot_base64"] = base64.b64encode(
+                    page.screenshot(full_page=True)
+                ).decode()
+                result["console_logs"] = console_logs[-50:]
+                result["page_errors"] = page_errors
 
             return result
         finally:
