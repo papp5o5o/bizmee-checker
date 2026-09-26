@@ -28,6 +28,22 @@ def check_room():
                 ]
             )
             context = browser.new_context(permissions=['camera', 'microphone'])
+
+            # フェイクマイク（--use-fake-device-for-media-stream）は合成音（ブー音）を
+            # 常時生成し、それがそのままマイク入力として他の参加者に聞こえてしまう。
+            # このツールは参加者名の取得だけが目的で音声は不要なため、getUserMedia()で
+            # 取得した音声トラックを即座に無効化しておく。映像トラックはpeer-view描画に
+            # 必要なので残す。page.goto()より前に登録することで、Bizmeeのページが
+            # 読み込まれた瞬間から効かせる。
+            context.add_init_script("""
+                const origGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia = async (constraints) => {
+                    const stream = await origGetUserMedia(constraints);
+                    stream.getAudioTracks().forEach(track => { track.enabled = false; });
+                    return stream;
+                };
+            """)
+
             page = context.new_page()
 
             page.goto(url, timeout=30000)
@@ -53,7 +69,7 @@ def check_room():
                 # そのため、クリックする前に表示名欄を埋めておく。
                 name_input = page.query_selector('#name')
                 if name_input:
-                    name_input.fill('試験運用中のBOT【気にしないで】')
+                    name_input.fill(' ')
 
                 start_button.click()
 
