@@ -69,7 +69,7 @@ def check_room():
                 # そのため、クリックする前に表示名欄を埋めておく。
                 name_input = page.query_selector('#name')
                 if name_input:
-                    name_input.fill(' ')
+                    name_input.fill('ll')
 
                 start_button.click()
 
